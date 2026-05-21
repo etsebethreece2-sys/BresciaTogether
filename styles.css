@@ -2965,3 +2965,104 @@ select {
     padding: 0 12px;
   }
 }
+
+/* Final Yap scroll fix: keep the app still, scroll only the message list. */
+body[data-active-tab="feedSection"] {
+  overflow: hidden !important;
+}
+
+#feedSection.active,
+#feedSection.active .main-grid,
+#feedSection.active .content-stack {
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+
+body[data-active-tab="feedSection"] .app-shell {
+  height: 100dvh !important;
+  max-height: 100dvh !important;
+  display: grid !important;
+  grid-template-rows: auto minmax(0, 1fr) !important;
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 12px) !important;
+}
+
+body[data-active-tab="feedSection"] .page-stage,
+#feedSection.active {
+  height: 100% !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+
+#feedSection.active .main-grid {
+  height: 100% !important;
+  min-height: 0 !important;
+  display: grid !important;
+  grid-template-columns: 1fr !important;
+  grid-template-rows: minmax(0, 1fr) auto !important;
+  gap: 14px !important;
+  align-content: stretch !important;
+}
+
+#feedSection.active .content-stack {
+  order: 1 !important;
+  height: 100% !important;
+  min-height: 0 !important;
+}
+
+#feedSection.active #feedForm {
+  order: 2 !important;
+  position: relative !important;
+  bottom: auto !important;
+  align-self: end !important;
+}
+
+#feedSection.active .feed-list {
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  overflow-y: scroll !important;
+  overflow-x: hidden !important;
+  align-content: start !important;
+  padding: 8px 12px 24px !important;
+  scroll-behavior: auto !important;
+  overscroll-behavior: contain !important;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  scrollbar-width: thin !important;
+  scrollbar-color: rgba(130, 220, 176, 0.45) rgba(255, 255, 255, 0.06) !important;
+}
+
+#feedSection.active .feed-list::-webkit-scrollbar {
+  width: 10px !important;
+  display: block !important;
+}
+
+#feedSection.active .feed-list::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border-radius: 999px !important;
+}
+
+#feedSection.active .feed-list::-webkit-scrollbar-thumb {
+  background: rgba(130, 220, 176, 0.45) !important;
+  border-radius: 999px !important;
+}
+
+@media (max-width: 760px) {
+  body[data-active-tab="feedSection"] .app-shell {
+    height: var(--app-height) !important;
+    max-height: var(--app-height) !important;
+  }
+
+  #feedSection.active .main-grid {
+    gap: 10px !important;
+  }
+
+  #feedSection.active .feed-list {
+    padding: 6px 4px 14px !important;
+    scrollbar-width: none !important;
+  }
+
+  #feedSection.active .feed-list::-webkit-scrollbar {
+    width: 0 !important;
+  }
+}
