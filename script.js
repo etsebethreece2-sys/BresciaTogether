@@ -1351,6 +1351,17 @@ function scrollYapToBottom(behavior = "smooth") {
   window.setTimeout(() => window.scrollTo(scrollOptions), 80);
 }
 
+function handleYapWheelScroll(event) {
+  if (state.activeTab !== "feedSection") return;
+  if (event.target.closest(".modal-backdrop.open, input, textarea, select")) return;
+
+  const scroller = elements.feedList;
+  if (!scroller || scroller.scrollHeight <= scroller.clientHeight) return;
+
+  event.preventDefault();
+  scroller.scrollTop += event.deltaY;
+}
+
 function openModal(id) {
   const modal = document.getElementById(id);
   modal.classList.remove("closing");
@@ -2079,6 +2090,7 @@ document.addEventListener("keydown", (event) => {
 window.addEventListener("load", updateViewportMetrics);
 window.addEventListener("resize", updateViewportMetrics);
 window.addEventListener("orientationchange", () => window.setTimeout(updateViewportMetrics, 250));
+window.addEventListener("wheel", handleYapWheelScroll, { passive: false });
 window.visualViewport?.addEventListener("resize", updateViewportMetrics);
 window.visualViewport?.addEventListener("scroll", updateViewportMetrics);
 
