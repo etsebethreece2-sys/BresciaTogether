@@ -2236,3 +2236,31 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Login subject screen: remove outer repeated container/header */
+.login-panel:has(#loginSubjectStep:not(.hidden)),
+.login-panel:has(#loginSubjectConfirm:not(.hidden)) {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  padding: 0 !important;
+}
+
+.login-panel:has(#loginSubjectStep:not(.hidden)) .login-head,
+.login-panel:has(#loginSubjectConfirm:not(.hidden)) .login-head {
+  display: none !important;
+}
+
+.login-panel:has(#loginSubjectStep:not(.hidden)) .login-subject-step,
+.login-panel:has(#loginSubjectConfirm:not(.hidden)) .login-subject-confirm {
+  max-height: calc(100vh - 56px);
+  overflow-y: auto;
+  padding: 28px;
+}
+
+.login-panel:has(#loginSubjectStep:not(.hidden)) .login-confirm-actions,
+.login-panel:has(#loginSubjectConfirm:not(.hidden)) .login-confirm-actions {
+  position: sticky;
+  bottom: 0;
+}
