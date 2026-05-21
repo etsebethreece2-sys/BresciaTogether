@@ -119,6 +119,7 @@ const TYPE_LABELS = {
   image: "Image",
   pdf: "PDF"
 };
+const MAX_YAP_MESSAGES = 200;
 const MAX_RESOURCE_FILE_SIZE = 10 * 1024 * 1024;
 const PDF_DB_NAME = "brescia_pdf_resources_v1";
 const PDF_DB_VERSION = 1;
@@ -132,7 +133,7 @@ const state = {
   displayName: normalizeUserName(localStorage.getItem(STORAGE_KEYS.selectedUser) || "") || "",
   subjectsConfirmed: localStorage.getItem(STORAGE_KEYS.subjectsConfirmed) === "true",
   claimedUsers: loadClaimedUsers(),
-  posts: normalizePosts(removePreviewPosts(load(STORAGE_KEYS.posts, []))),
+  posts: limitPostList(normalizePosts(removePreviewPosts(load(STORAGE_KEYS.posts, [])))),
   notes: normalizeNotes(removePreviewNotes(load(STORAGE_KEYS.notes, load(LEGACY_NOTES_KEY, [])))),
   activeTab: "feedSection",
   chatZoom: Number(localStorage.getItem(STORAGE_KEYS.chatZoom)) || 100,
@@ -248,6 +249,14 @@ function normalizePosts(posts) {
     likedBy: normalizeList(post.likedBy),
     comments: normalizeList(post.comments)
   })) : [];
+}
+
+function limitPostList(posts, max = MAX_YAP_MESSAGES) {
+  if (!Array.isArray(posts)) return [];
+  return posts
+    .filter(Boolean)
+    .sort((a, b) => (Number(a.createdAt) || 0) - (Number(b.createdAt) || 0))
+    .slice(-max);
 }
 
 function normalizeNotes(notes) {
@@ -649,16 +658,31 @@ function mapSupabaseResource(row) {
 async function loadSupabaseYaps() {
   if (!USE_SUPABASE) return false;
   try {
-    const [{ data: yaps, error: yapsError }, { data: replies, error: repliesError }] = await Promise.all([
-      supabaseClient.from("yaps").select("id, user_name, body, created_at").order("created_at", { ascending: true }),
-      supabaseClient.from("yap_replies").select("id, yap_id, user_name, body, created_at").order("created_at", { ascending: true })
-    ]);
+    const { data: yaps, error: yapsError } = await supabaseClient
+      .from("yaps")
+      .select("id, user_name, body, created_at")
+      .order("created_at", { ascending: false })
+      .limit(MAX_YAP_MESSAGES);
 
     if (yapsError) throw yapsError;
-    if (repliesError) throw repliesError;
+
+    const newestYaps = (Array.isArray(yaps) ? yaps : []).slice().reverse();
+    const yapIds = newestYaps.map((row) => row.id).filter(Boolean);
+    let replies = [];
+
+    if (yapIds.length) {
+      const { data: replyRows, error: repliesError } = await supabaseClient
+        .from("yap_replies")
+        .select("id, yap_id, user_name, body, created_at")
+        .in("yap_id", yapIds)
+        .order("created_at", { ascending: true });
+
+      if (repliesError) throw repliesError;
+      replies = Array.isArray(replyRows) ? replyRows : [];
+    }
 
     const repliesByYap = {};
-    (replies || []).forEach((reply) => {
+    replies.forEach((reply) => {
       const item = {
         id: reply.id,
         author: reply.user_name || "Someone",
@@ -669,13 +693,52 @@ async function loadSupabaseYaps() {
       repliesByYap[reply.yap_id].push(item);
     });
 
-    state.posts = (yaps || []).map((row) => mapSupabaseYap(row, repliesByYap));
+    state.posts = limitPostList(newestYaps.map((row) => mapSupabaseYap(row, repliesByYap)));
     renderFeed();
     renderTabBadges();
     if (state.activeTab === "feedSection") window.requestAnimationFrame(() => scrollYapToBottom("auto"));
     return true;
   } catch (error) {
     console.warn("Could not load Supabase yaps", error);
+    return false;
+  }
+}
+
+async function trimSupabaseYapsToLimit(limit = MAX_YAP_MESSAGES) {
+  if (!USE_SUPABASE) return false;
+
+  try {
+    let removedAny = false;
+
+    for (let pass = 0; pass < 8; pass += 1) {
+      const { data, error } = await supabaseClient
+        .from("yaps")
+        .select("id")
+        .order("created_at", { ascending: false })
+        .range(limit, limit + 199);
+
+      if (error) throw error;
+
+      const oldIds = (Array.isArray(data) ? data : [])
+        .map((row) => row.id)
+        .filter(Boolean);
+
+      if (!oldIds.length) break;
+
+      const { error: deleteError } = await supabaseClient
+        .from("yaps")
+        .delete()
+        .in("id", oldIds);
+
+      if (deleteError) throw deleteError;
+      removedAny = true;
+
+      if (oldIds.length < 200) break;
+    }
+
+    return removedAny;
+  } catch (error) {
+    console.warn("Could not trim old yaps", error);
     return false;
   }
 }
@@ -711,6 +774,7 @@ async function syncFromSupabase(options = {}) {
 async function sendSupabaseYap(body, author) {
   const { error } = await supabaseClient.from("yaps").insert({ body, user_name: author });
   if (error) throw error;
+  await trimSupabaseYapsToLimit();
 }
 
 async function sendSupabaseReply(yapId, body, author) {
@@ -1689,6 +1753,7 @@ elements.postForm.addEventListener("submit", async (event) => {
         comments: [],
         createdAt: Date.now()
       });
+      state.posts = limitPostList(state.posts);
       save(STORAGE_KEYS.posts, state.posts);
       elements.postForm.reset();
       renderAll();
