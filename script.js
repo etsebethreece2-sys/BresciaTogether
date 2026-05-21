@@ -197,6 +197,14 @@ let loginConfirmStage = 0;
 let yapsRefreshTimer = null;
 let lastFeedRenderSignature = "";
 
+function updateViewportMetrics() {
+  const viewportHeight = window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight;
+  const topbarHeight = document.querySelector(".topbar")?.offsetHeight || 0;
+  document.documentElement.style.setProperty("--app-height", `${Math.round(viewportHeight)}px`);
+  document.documentElement.style.setProperty("--topbar-height", `${Math.round(topbarHeight)}px`);
+}
+
+updateViewportMetrics();
 renderHeaderGreeting();
 renderLoginUsers();
 ensureSelectedSubject();
@@ -659,6 +667,7 @@ function mapSupabaseResource(row) {
 
 async function loadSupabaseYaps() {
   if (!USE_SUPABASE) return false;
+  const shouldStickToBottom = isYapScrolledNearBottom();
   try {
     const { data: yaps, error: yapsError } = await supabaseClient
       .from("yaps")
@@ -698,7 +707,9 @@ async function loadSupabaseYaps() {
     state.posts = limitPostList(newestYaps.map((row) => mapSupabaseYap(row, repliesByYap)));
     renderFeed();
     renderTabBadges();
-    if (state.activeTab === "feedSection") window.requestAnimationFrame(() => scrollYapToBottom("auto"));
+    if (state.activeTab === "feedSection" && shouldStickToBottom) {
+      window.requestAnimationFrame(() => scrollYapToBottom("auto"));
+    }
     return true;
   } catch (error) {
     console.warn("Could not load Supabase yaps", error);
@@ -1065,13 +1076,21 @@ function renderSubjectNavigation() {
 }
 
 
+function postRenderSignature(post) {
+  const comments = normalizeList(post.comments)
+    .map((comment) => `${comment.id}:${comment.author}:${comment.text}:${comment.createdAt}`)
+    .join(",");
+  return `${post.id}:${post.author}:${post.body}:${post.createdAt}:${likeCount(post)}:${comments}`;
+}
+
 function feedRenderSignature(posts) {
-  return posts.map((post) => {
-    const comments = normalizeList(post.comments)
-      .map((comment) => `${comment.id}:${comment.author}:${comment.text}:${comment.createdAt}`)
-      .join(",");
-    return `${post.id}:${post.author}:${post.body}:${post.createdAt}:${comments}`;
-  }).join("|") || "__empty__";
+  return posts.map(postRenderSignature).join("|") || "__empty__";
+}
+
+function isYapScrolledNearBottom(threshold = 120) {
+  const scroller = elements.feedList;
+  if (!scroller) return true;
+  return scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= threshold;
 }
 
 function renderFeed() {
@@ -1082,6 +1101,18 @@ function renderFeed() {
   if (signature === lastFeedRenderSignature && elements.feedList.innerHTML.trim()) {
     return;
   }
+
+  const existingCards = Array.from(elements.feedList.querySelectorAll(".post-card"));
+  const existingIds = existingCards.map((card) => card.dataset.postId).filter(Boolean);
+  const incomingIds = filtered.map((post) => post.id);
+  const canAppendOnly = existingCards.length > 0
+    && existingIds.length > 0
+    && incomingIds.length >= existingIds.length
+    && existingIds.every((id, index) => id === incomingIds[index])
+    && filtered.slice(0, existingIds.length).every((post, index) => (
+      existingCards[index]?.dataset.renderSignature === encodeURIComponent(postRenderSignature(post))
+    ));
+
   lastFeedRenderSignature = signature;
 
   if (!filtered.length) {
@@ -1093,6 +1124,14 @@ function renderFeed() {
     return;
   }
 
+  if (canAppendOnly) {
+    const newPosts = filtered.slice(existingIds.length);
+    if (newPosts.length) {
+      elements.feedList.insertAdjacentHTML("beforeend", newPosts.map(renderPostCard).join(""));
+    }
+    return;
+  }
+
   elements.feedList.innerHTML = filtered.map(renderPostCard).join("");
 }
 
@@ -1101,7 +1140,7 @@ function renderPostCard(post) {
   const own = ownsItem(post);
 
   return `
-      <article class="post-card ${own ? "own-message" : "other-message"}" data-post-id="${post.id}">
+      <article class="post-card ${own ? "own-message" : "other-message"}" data-post-id="${post.id}" data-render-signature="${encodeURIComponent(postRenderSignature(post))}">
         <div class="post-message">
           <div class="post-header">
             <div class="identity">
@@ -1293,10 +1332,20 @@ function renderAll() {
   renderFeed();
   renderNotes();
   renderTabBadges();
+  window.requestAnimationFrame(updateViewportMetrics);
 }
 
 function scrollYapToBottom(behavior = "smooth") {
   if (state.activeTab !== "feedSection") return;
+  const scroller = elements.feedList;
+
+  if (scroller) {
+    const scrollOptions = { top: scroller.scrollHeight, behavior };
+    scroller.scrollTo(scrollOptions);
+    window.setTimeout(() => scroller.scrollTo(scrollOptions), 80);
+    return;
+  }
+
   const scrollOptions = { top: document.documentElement.scrollHeight, behavior };
   window.scrollTo(scrollOptions);
   window.setTimeout(() => window.scrollTo(scrollOptions), 80);
@@ -1354,6 +1403,7 @@ function setTab(tabId) {
   const nextSection = document.getElementById(tabId);
   state.activeTab = tabId;
   document.body.dataset.activeTab = tabId;
+  updateViewportMetrics();
   markTabSeen(tabId);
 
   tabs.forEach((button) => button.classList.toggle("active", button.dataset.tab === tabId));
@@ -2025,6 +2075,12 @@ document.addEventListener("keydown", (event) => {
     closeModal("pdfViewerModal");
   }
 });
+
+window.addEventListener("load", updateViewportMetrics);
+window.addEventListener("resize", updateViewportMetrics);
+window.addEventListener("orientationchange", () => window.setTimeout(updateViewportMetrics, 250));
+window.visualViewport?.addEventListener("resize", updateViewportMetrics);
+window.visualViewport?.addEventListener("scroll", updateViewportMetrics);
 
 initAmbientShapes();
 document.body.dataset.activeTab = state.activeTab;
