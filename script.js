@@ -196,6 +196,8 @@ let pendingSubjectColors = {};
 let loginConfirmStage = 0;
 let yapsRefreshTimer = null;
 let lastFeedRenderSignature = "";
+let yapScrollAnimation = 0;
+let yapScrollTarget = 0;
 
 function updateViewportMetrics() {
   const viewportHeight = window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight;
@@ -991,7 +993,7 @@ function togglePerson(list, name = currentName()) {
 function clampChatZoom(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return 100;
-  return Math.min(130, Math.max(80, number));
+  return Math.min(130, Math.max(60, number));
 }
 
 function applyChatZoom(value, shouldSave = true) {
@@ -1143,12 +1145,8 @@ function renderPostCard(post) {
       <article class="post-card ${own ? "own-message" : "other-message"}" data-post-id="${post.id}" data-render-signature="${encodeURIComponent(postRenderSignature(post))}">
         <div class="post-message">
           <div class="post-header">
-            <div class="identity">
-              <div>
-                <p class="chat-author">${escapeHTML(post.author)}</p>
-                <p class="meta">${formatDate(post.createdAt)}</p>
-              </div>
-            </div>
+            <p class="chat-author">${escapeHTML(post.author)}</p>
+            <p class="message-time">${formatDate(post.createdAt)}</p>
           </div>
           <p class="post-body">${escapeHTML(post.body)}</p>
         </div>
@@ -1340,6 +1338,7 @@ function scrollYapToBottom(behavior = "smooth") {
   const scroller = elements.feedList;
 
   if (scroller && scroller.scrollHeight > scroller.clientHeight + 2) {
+    stopSmoothYapScroll(scroller.scrollHeight);
     const scrollOptions = { top: scroller.scrollHeight, behavior };
     scroller.scrollTo(scrollOptions);
     window.setTimeout(() => scroller.scrollTo(scrollOptions), 80);
@@ -1351,18 +1350,51 @@ function scrollYapToBottom(behavior = "smooth") {
   window.setTimeout(() => window.scrollTo(scrollOptions), 80);
 }
 
+function stopSmoothYapScroll(target = elements.feedList?.scrollTop || 0) {
+  if (yapScrollAnimation) {
+    window.cancelAnimationFrame(yapScrollAnimation);
+    yapScrollAnimation = 0;
+  }
+  yapScrollTarget = target;
+}
+
+function smoothScrollYapBy(delta) {
+  const scroller = elements.feedList;
+  if (!scroller) return;
+
+  const maxScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+  const currentTarget = yapScrollAnimation ? yapScrollTarget : scroller.scrollTop;
+  yapScrollTarget = Math.min(maxScroll, Math.max(0, currentTarget + delta));
+
+  if (yapScrollAnimation) return;
+
+  const step = () => {
+    const distance = yapScrollTarget - scroller.scrollTop;
+    if (Math.abs(distance) < 0.75) {
+      scroller.scrollTop = yapScrollTarget;
+      yapScrollAnimation = 0;
+      return;
+    }
+
+    scroller.scrollTop += distance * 0.18;
+    yapScrollAnimation = window.requestAnimationFrame(step);
+  };
+
+  yapScrollAnimation = window.requestAnimationFrame(step);
+}
+
 function handleYapWheelScroll(event) {
   if (event.defaultPrevented) return;
   if (state.activeTab !== "feedSection") return;
   const target = event.target instanceof Element ? event.target : null;
-  if (target?.closest(".modal-backdrop.open, input, select")) return;
+  if (target?.closest(".modal-backdrop.open, input, textarea, select")) return;
 
   const scroller = elements.feedList;
   if (!scroller || scroller.scrollHeight <= scroller.clientHeight) return;
 
   event.preventDefault();
   const deltaScale = event.deltaMode === 1 ? 18 : event.deltaMode === 2 ? scroller.clientHeight : 1;
-  scroller.scrollBy({ top: event.deltaY * deltaScale, behavior: "auto" });
+  smoothScrollYapBy(event.deltaY * deltaScale);
 }
 
 function handleYapKeyboardScroll(event) {
@@ -1386,16 +1418,18 @@ function handleYapKeyboardScroll(event) {
   event.preventDefault();
 
   if (event.key === "Home") {
+    stopSmoothYapScroll(0);
     scroller.scrollTo({ top: 0, behavior: "auto" });
     return;
   }
 
   if (event.key === "End") {
+    stopSmoothYapScroll(scroller.scrollHeight);
     scroller.scrollTo({ top: scroller.scrollHeight, behavior: "auto" });
     return;
   }
 
-  scroller.scrollBy({ top: keyScroll[event.key], behavior: "auto" });
+  smoothScrollYapBy(keyScroll[event.key]);
 }
 
 function openModal(id) {
