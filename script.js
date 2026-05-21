@@ -1339,7 +1339,7 @@ function scrollYapToBottom(behavior = "smooth") {
   if (state.activeTab !== "feedSection") return;
   const scroller = elements.feedList;
 
-  if (scroller) {
+  if (scroller && scroller.scrollHeight > scroller.clientHeight + 2) {
     const scrollOptions = { top: scroller.scrollHeight, behavior };
     scroller.scrollTo(scrollOptions);
     window.setTimeout(() => scroller.scrollTo(scrollOptions), 80);
@@ -1357,6 +1357,7 @@ function handleYapWheelScroll(event) {
 
   const scroller = elements.feedList;
   if (!scroller || scroller.scrollHeight <= scroller.clientHeight) return;
+  if (getComputedStyle(scroller).overflowY === "visible") return;
 
   event.preventDefault();
   scroller.scrollTop += event.deltaY;
