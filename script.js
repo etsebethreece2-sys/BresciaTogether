@@ -3,6 +3,7 @@ const STORAGE_KEYS = {
   posts: "gradeconnect_posts_v1",
   notes: "gradeconnect_notes_v2",
   seenPosts: "brescia_seen_posts_v1",
+  typingSignal: "brescia_yap_typing_signal_v1",
   chatZoom: "brescia_chat_zoom_v1",
   selectedUser: "brescia_selected_user_v1",
   claimedUsers: "brescia_claimed_users_v1",
@@ -120,6 +121,10 @@ const TYPE_LABELS = {
   pdf: "PDF"
 };
 const MAX_YAP_MESSAGES = 200;
+const MAX_CHAT_ATTACHMENT_SIZE = 1.8 * 1024 * 1024;
+const CHAT_PAYLOAD_KIND = "brescia-chat-message";
+const TYPING_STALE_MS = 3600;
+const TYPING_IDLE_MS = 1200;
 const MAX_RESOURCE_FILE_SIZE = 10 * 1024 * 1024;
 const PDF_DB_NAME = "brescia_pdf_resources_v1";
 const PDF_DB_VERSION = 1;
@@ -170,6 +175,10 @@ const elements = {
   loginSubjectConfirmPrimary: $("#loginSubjectConfirmPrimary"),
   feedList: $("#feedList"),
   notesList: $("#notesList"),
+  postBody: $("#postBody"),
+  postAttachment: $("#postAttachment"),
+  postAttachmentMeta: $("#postAttachmentMeta"),
+  clearPostAttachment: $("#clearPostAttachment"),
   postForm: $("#postForm"),
   notesForm: $("#notesForm"),
   notesSearch: $("#notesSearch"),
@@ -198,6 +207,11 @@ let yapsRefreshTimer = null;
 let lastFeedRenderSignature = "";
 let yapScrollAnimation = 0;
 let yapScrollTarget = 0;
+let typingChannel = null;
+let typingStopTimer = null;
+let typingCleanupTimer = null;
+let lastTypingSentAt = 0;
+const typingUsers = new Map();
 
 function updateViewportMetrics() {
   const viewportHeight = window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight;
@@ -256,11 +270,16 @@ function removePreviewNotes(notes) {
 }
 
 function normalizePosts(posts) {
-  return Array.isArray(posts) ? posts.map((post) => ({
-    ...post,
-    likedBy: normalizeList(post.likedBy),
-    comments: normalizeList(post.comments)
-  })) : [];
+  return Array.isArray(posts) ? posts.map((post) => {
+    const decoded = decodeYapBody(post.body || "");
+    return {
+      ...post,
+      body: decoded.body,
+      attachment: normalizeChatAttachment(post.attachment || decoded.attachment),
+      likedBy: normalizeList(post.likedBy),
+      comments: normalizeList(post.comments)
+    };
+  }) : [];
 }
 
 function limitPostList(posts, max = MAX_YAP_MESSAGES) {
@@ -623,9 +642,11 @@ function fromSupabaseTime(value) {
 }
 
 function mapSupabaseYap(row, repliesByYap) {
+  const decoded = decodeYapBody(row.body || "");
   return {
     id: row.id,
-    body: row.body || "",
+    body: decoded.body,
+    attachment: decoded.attachment,
     author: row.user_name || "Someone",
     likedBy: [],
     comments: repliesByYap[row.id] || [],
@@ -786,8 +807,8 @@ async function syncFromSupabase(options = {}) {
   return true;
 }
 
-async function sendSupabaseYap(body, author) {
-  const { error } = await supabaseClient.from("yaps").insert({ body, user_name: author });
+async function sendSupabaseYap(body, author, attachment = null) {
+  const { error } = await supabaseClient.from("yaps").insert({ body: encodeYapBody(body, attachment), user_name: author });
   if (error) throw error;
   await trimSupabaseYapsToLimit();
 }
@@ -977,6 +998,111 @@ function formatBytes(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function normalizeChatAttachment(attachment) {
+  if (!attachment || typeof attachment !== "object") return null;
+  const name = String(attachment.name || "Attachment").trim().slice(0, 120) || "Attachment";
+  const type = String(attachment.type || "application/octet-stream").trim();
+  const dataUrl = String(attachment.dataUrl || "");
+  if (!dataUrl.startsWith("data:")) return null;
+  return {
+    name,
+    type,
+    size: Number(attachment.size) || 0,
+    dataUrl
+  };
+}
+
+function decodeYapBody(rawBody = "") {
+  const text = String(rawBody || "");
+  if (!text.trim().startsWith("{")) return { body: text, attachment: null };
+
+  try {
+    const payload = JSON.parse(text);
+    if (payload?.kind !== CHAT_PAYLOAD_KIND) return { body: text, attachment: null };
+    return {
+      body: String(payload.body || ""),
+      attachment: normalizeChatAttachment(payload.attachment)
+    };
+  } catch (error) {
+    return { body: text, attachment: null };
+  }
+}
+
+function encodeYapBody(body, attachment) {
+  const normalizedAttachment = normalizeChatAttachment(attachment);
+  if (!normalizedAttachment) return body;
+  return JSON.stringify({
+    kind: CHAT_PAYLOAD_KIND,
+    version: 1,
+    body,
+    attachment: normalizedAttachment
+  });
+}
+
+function isImageAttachment(attachment) {
+  return String(attachment?.type || "").startsWith("image/");
+}
+
+function renderChatAttachment(attachment) {
+  const item = normalizeChatAttachment(attachment);
+  if (!item) return "";
+  const meta = [item.name, item.size ? formatBytes(item.size) : ""].filter(Boolean).join(" - ");
+
+  if (isImageAttachment(item)) {
+    return `
+      <a class="chat-attachment image-attachment" href="${item.dataUrl}" download="${escapeHTML(item.name)}" title="Open ${escapeHTML(item.name)}">
+        <img src="${item.dataUrl}" alt="${escapeHTML(item.name)}" />
+        <span>${escapeHTML(meta)}</span>
+      </a>
+    `;
+  }
+
+  return `
+    <a class="chat-attachment file-attachment" href="${item.dataUrl}" download="${escapeHTML(item.name)}" title="Download ${escapeHTML(item.name)}">
+      <span class="attachment-icon" aria-hidden="true"></span>
+      <span>${escapeHTML(meta)}</span>
+    </a>
+  `;
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => resolve(String(reader.result || "")));
+    reader.addEventListener("error", () => reject(reader.error || new Error("Could not read file")));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function selectedChatAttachment() {
+  const file = elements.postAttachment?.files?.[0];
+  if (!file) return null;
+  if (file.size > MAX_CHAT_ATTACHMENT_SIZE) {
+    throw new Error(`Attachments must be smaller than ${formatBytes(MAX_CHAT_ATTACHMENT_SIZE)}.`);
+  }
+  return {
+    name: file.name || "Attachment",
+    type: file.type || "application/octet-stream",
+    size: file.size || 0,
+    dataUrl: await readFileAsDataUrl(file)
+  };
+}
+
+function updatePostAttachmentMeta() {
+  if (!elements.postAttachmentMeta || !elements.postAttachment) return;
+  const file = elements.postAttachment.files?.[0];
+  const hasFile = Boolean(file);
+  elements.postAttachmentMeta.textContent = hasFile
+    ? `${file.name} ${file.size ? `- ${formatBytes(file.size)}` : ""}`
+    : "No file selected";
+  elements.clearPostAttachment?.classList.toggle("hidden", !hasFile);
+}
+
+function clearPostAttachment() {
+  if (elements.postAttachment) elements.postAttachment.value = "";
+  updatePostAttachmentMeta();
+}
+
 function ownsItem(item) {
   return currentName() && item.author === currentName();
 }
@@ -1082,7 +1208,8 @@ function postRenderSignature(post) {
   const comments = normalizeList(post.comments)
     .map((comment) => `${comment.id}:${comment.author}:${comment.text}:${comment.createdAt}`)
     .join(",");
-  return `${post.id}:${post.author}:${post.body}:${post.createdAt}:${likeCount(post)}:${comments}`;
+  const attachment = post.attachment ? `${post.attachment.name}:${post.attachment.size}:${post.attachment.type}` : "";
+  return `${post.id}:${post.author}:${post.body}:${attachment}:${post.createdAt}:${likeCount(post)}:${comments}`;
 }
 
 function feedRenderSignature(posts) {
@@ -1093,6 +1220,103 @@ function isYapScrolledNearBottom(threshold = 120) {
   const scroller = elements.feedList;
   if (!scroller) return true;
   return scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= threshold;
+}
+
+function activeTypingNames() {
+  const now = Date.now();
+  return Array.from(typingUsers.entries())
+    .filter(([, expiresAt]) => expiresAt > now)
+    .map(([name]) => name)
+    .filter((name) => name && name !== currentName())
+    .sort((a, b) => a.localeCompare(b));
+}
+
+function typingLabel(names) {
+  if (names.length === 1) return `${firstNameFromDisplayName(names[0]) || names[0]} is typing`;
+  if (names.length === 2) {
+    return `${firstNameFromDisplayName(names[0]) || names[0]} and ${firstNameFromDisplayName(names[1]) || names[1]} are typing`;
+  }
+  return "Several people are typing";
+}
+
+function renderTypingIndicator() {
+  if (!elements.feedList) return;
+  elements.feedList.querySelector(".typing-indicator")?.remove();
+  const names = activeTypingNames();
+  if (!names.length) return;
+
+  elements.feedList.insertAdjacentHTML("beforeend", `
+    <div class="typing-indicator" aria-live="polite">
+      <span class="typing-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span>${escapeHTML(typingLabel(names))}</span>
+    </div>
+  `);
+}
+
+function cleanupTypingUsers() {
+  const now = Date.now();
+  let changed = false;
+  typingUsers.forEach((expiresAt, name) => {
+    if (expiresAt <= now) {
+      typingUsers.delete(name);
+      changed = true;
+    }
+  });
+  if (changed) renderTypingIndicator();
+  window.clearTimeout(typingCleanupTimer);
+  typingCleanupTimer = window.setTimeout(cleanupTypingUsers, TYPING_STALE_MS);
+}
+
+function setTypingUser(name, isTyping) {
+  const normalizedName = normalizeUserName(name);
+  if (!normalizedName || normalizedName === currentName()) return;
+  if (isTyping) {
+    typingUsers.set(normalizedName, Date.now() + TYPING_STALE_MS);
+  } else {
+    typingUsers.delete(normalizedName);
+  }
+  renderTypingIndicator();
+}
+
+function broadcastTyping(isTyping) {
+  const name = currentName();
+  if (!name) return;
+  const now = Date.now();
+  if (isTyping && now - lastTypingSentAt < 700) return;
+  lastTypingSentAt = now;
+  const payload = { user: name, isTyping, sentAt: now };
+
+  try {
+    typingChannel?.send?.({ type: "broadcast", event: "typing", payload })?.catch?.((error) => {
+      console.warn("Could not broadcast typing status", error);
+    });
+  } catch (error) {
+    console.warn("Could not broadcast typing status", error);
+  }
+
+  try {
+    localStorage.setItem(STORAGE_KEYS.typingSignal, JSON.stringify({ ...payload, id: crypto.randomUUID() }));
+  } catch (error) {
+    console.warn("Could not save typing signal", error);
+  }
+}
+
+function handleComposerTyping() {
+  if (!isLoginComplete()) return;
+  const hasDraft = Boolean(elements.postBody?.value.trim() || elements.postAttachment?.files?.length);
+  broadcastTyping(hasDraft);
+  window.clearTimeout(typingStopTimer);
+  typingStopTimer = window.setTimeout(() => broadcastTyping(false), TYPING_IDLE_MS);
+}
+
+function initTypingChannel() {
+  if (!USE_SUPABASE || !supabaseClient?.channel) return;
+  typingChannel = supabaseClient
+    .channel("brescia-yap-typing")
+    .on("broadcast", { event: "typing" }, ({ payload }) => {
+      setTypingUser(payload?.user, Boolean(payload?.isTyping));
+    })
+    .subscribe();
 }
 
 function renderFeed() {
@@ -1123,32 +1347,40 @@ function renderFeed() {
         <strong>Say hi first!</strong>
       </div>
     `;
+    renderTypingIndicator();
     return;
   }
 
   if (canAppendOnly) {
     const newPosts = filtered.slice(existingIds.length);
     if (newPosts.length) {
-      elements.feedList.insertAdjacentHTML("beforeend", newPosts.map(renderPostCard).join(""));
+      elements.feedList.querySelector(".typing-indicator")?.remove();
+      elements.feedList.insertAdjacentHTML("beforeend", newPosts.map((post) => renderPostCard(post, true)).join(""));
+      window.setTimeout(() => {
+        elements.feedList.querySelectorAll(".post-card.is-new").forEach((card) => card.classList.remove("is-new"));
+      }, 520);
     }
+    renderTypingIndicator();
     return;
   }
 
   elements.feedList.innerHTML = filtered.map(renderPostCard).join("");
+  renderTypingIndicator();
 }
 
-function renderPostCard(post) {
+function renderPostCard(post, isNew = false) {
   const liked = hasLiked(post);
   const own = ownsItem(post);
 
   return `
-      <article class="post-card ${own ? "own-message" : "other-message"}" data-post-id="${post.id}" data-render-signature="${encodeURIComponent(postRenderSignature(post))}">
+      <article class="post-card ${own ? "own-message" : "other-message"} ${isNew ? "is-new" : ""}" data-post-id="${post.id}" data-render-signature="${encodeURIComponent(postRenderSignature(post))}">
         <div class="post-message">
           <div class="post-header">
             <p class="chat-author">${escapeHTML(post.author)}</p>
             <p class="message-time">${formatDate(post.createdAt)}</p>
           </div>
-          <p class="post-body">${escapeHTML(post.body)}</p>
+          ${post.body ? `<p class="post-body">${escapeHTML(post.body)}</p>` : ""}
+          ${renderChatAttachment(post.attachment)}
         </div>
         <div class="post-actions">
           ${own ? "" : `
@@ -1887,23 +2119,33 @@ elements.postForm.addEventListener("submit", async (event) => {
   const author = requireDisplayName();
   if (!author) return;
 
-  const body = $("#postBody").value.trim();
-  if (!body) return;
+  const body = elements.postBody.value.trim();
+  let attachment = null;
+  try {
+    attachment = await selectedChatAttachment();
+  } catch (error) {
+    alert(error.message || "That attachment could not be added.");
+    return;
+  }
+  if (!body && !attachment) return;
 
   const submitButton = elements.postForm.querySelector("button[type='submit']");
   const originalButtonText = submitButton.textContent;
   submitButton.disabled = true;
   submitButton.textContent = "Sending...";
+  broadcastTyping(false);
 
   try {
     if (USE_SUPABASE) {
-      await sendSupabaseYap(body, author);
+      await sendSupabaseYap(body, author, attachment);
       elements.postForm.reset();
+      updatePostAttachmentMeta();
       await loadSupabaseYaps();
     } else {
       state.posts.push({
         id: crypto.randomUUID(),
         body,
+        attachment,
         author,
         likedBy: [],
         comments: [],
@@ -1912,6 +2154,7 @@ elements.postForm.addEventListener("submit", async (event) => {
       state.posts = limitPostList(state.posts);
       save(STORAGE_KEYS.posts, state.posts);
       elements.postForm.reset();
+      updatePostAttachmentMeta();
       renderAll();
     }
     window.requestAnimationFrame(() => scrollYapToBottom());
@@ -2075,6 +2318,23 @@ elements.clearSelectedFile.addEventListener("click", () => {
   elements.clearSelectedFile.classList.add("hidden");
 });
 
+elements.postBody?.addEventListener("input", handleComposerTyping);
+
+elements.postBody?.addEventListener("blur", () => {
+  window.clearTimeout(typingStopTimer);
+  broadcastTyping(false);
+});
+
+elements.postAttachment?.addEventListener("change", () => {
+  updatePostAttachmentMeta();
+  handleComposerTyping();
+});
+
+elements.clearPostAttachment?.addEventListener("click", () => {
+  clearPostAttachment();
+  handleComposerTyping();
+});
+
 if (elements.chatZoom) {
   elements.chatZoom.addEventListener("input", () => {
     applyChatZoom(elements.chatZoom.value);
@@ -2167,6 +2427,8 @@ window.visualViewport?.addEventListener("resize", updateViewportMetrics);
 window.visualViewport?.addEventListener("scroll", updateViewportMetrics);
 
 initAmbientShapes();
+initTypingChannel();
+cleanupTypingUsers();
 document.body.dataset.activeTab = state.activeTab;
 if (!USE_SUPABASE && state.selectedUser && !state.claimedUsers.includes(state.selectedUser)) {
   state.claimedUsers.push(state.selectedUser);
@@ -2193,6 +2455,16 @@ async function initialiseApp() {
 initialiseApp();
 
 window.addEventListener("storage", (event) => {
+  if (event.key === STORAGE_KEYS.typingSignal && event.newValue) {
+    try {
+      const payload = JSON.parse(event.newValue);
+      setTypingUser(payload.user, Boolean(payload.isTyping));
+    } catch (error) {
+      console.warn("Could not read typing signal", error);
+    }
+    return;
+  }
+
   if (USE_SUPABASE) return;
 
   if (event.key === STORAGE_KEYS.claimedUsers) {
