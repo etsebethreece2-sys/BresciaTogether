@@ -194,6 +194,8 @@ let pendingLoginUser = "";
 let pendingSubjectChoices = [];
 let pendingSubjectColors = {};
 let loginConfirmStage = 0;
+let yapsRefreshTimer = null;
+let lastFeedRenderSignature = "";
 
 renderHeaderGreeting();
 renderLoginUsers();
@@ -835,13 +837,20 @@ async function signedSupabasePdfUrl(filePath) {
   return data?.signedUrl || "";
 }
 
+
+function scheduleSupabaseYapsRefresh(delay = 120) {
+  if (!USE_SUPABASE) return;
+  window.clearTimeout(yapsRefreshTimer);
+  yapsRefreshTimer = window.setTimeout(() => loadSupabaseYaps(), delay);
+}
+
 function startSupabaseRealtime() {
   if (!USE_SUPABASE) return;
   try {
     supabaseClient.channel("brescia-together-live")
       .on("postgres_changes", { event: "*", schema: "public", table: "app_users" }, () => loadSupabaseUsers())
-      .on("postgres_changes", { event: "*", schema: "public", table: "yaps" }, () => loadSupabaseYaps())
-      .on("postgres_changes", { event: "*", schema: "public", table: "yap_replies" }, () => loadSupabaseYaps())
+      .on("postgres_changes", { event: "*", schema: "public", table: "yaps" }, () => scheduleSupabaseYapsRefresh())
+      .on("postgres_changes", { event: "*", schema: "public", table: "yap_replies" }, () => scheduleSupabaseYapsRefresh())
       .on("postgres_changes", { event: "*", schema: "public", table: "resources" }, () => loadSupabaseResources())
       .subscribe();
   } catch (error) {
@@ -1055,9 +1064,25 @@ function renderSubjectNavigation() {
   elements.subjectRail.innerHTML = subjects.map((subject) => buttonMarkup(subject)).join("");
 }
 
+
+function feedRenderSignature(posts) {
+  return posts.map((post) => {
+    const comments = normalizeList(post.comments)
+      .map((comment) => `${comment.id}:${comment.author}:${comment.text}:${comment.createdAt}`)
+      .join(",");
+    return `${post.id}:${post.author}:${post.body}:${post.createdAt}:${comments}`;
+  }).join("|") || "__empty__";
+}
+
 function renderFeed() {
-  const filtered = state.posts
+  const filtered = [...state.posts]
     .sort((a, b) => a.createdAt - b.createdAt);
+  const signature = feedRenderSignature(filtered);
+
+  if (signature === lastFeedRenderSignature && elements.feedList.innerHTML.trim()) {
+    return;
+  }
+  lastFeedRenderSignature = signature;
 
   if (!filtered.length) {
     elements.feedList.innerHTML = `
