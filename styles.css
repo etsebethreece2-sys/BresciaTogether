@@ -2178,7 +2178,7 @@
   }
 }
 
-/* Keeps the login/subject chooser usable on smaller screens. */
+/* Login subject screen scroll + single-container polish */
 .login-backdrop {
   position: fixed;
   inset: 0;
@@ -2222,22 +2222,6 @@
   );
 }
 
-@media (max-width: 720px) {
-  .login-backdrop {
-    padding: 10px;
-  }
-
-  .login-panel {
-    max-height: calc(100vh - 20px);
-    padding: 22px;
-  }
-
-  .login-subject-list {
-    grid-template-columns: 1fr;
-  }
-}
-
-/* Login subject screen: remove outer repeated container/header */
 .login-panel:has(#loginSubjectStep:not(.hidden)),
 .login-panel:has(#loginSubjectConfirm:not(.hidden)) {
   background: transparent !important;
@@ -2263,4 +2247,67 @@
 .login-panel:has(#loginSubjectConfirm:not(.hidden)) .login-confirm-actions {
   position: sticky;
   bottom: 0;
+}
+
+/* Header layout: put the Yap/Notes star tabs between the title and greeting. */
+.topbar {
+  display: grid;
+  grid-template-columns: minmax(230px, 1fr) auto minmax(130px, 1fr);
+  align-items: center;
+  column-gap: 18px;
+}
+
+.topbar .site-brand {
+  justify-self: start;
+}
+
+.topbar .tabs {
+  justify-self: center;
+  margin: 0;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: nowrap;
+}
+
+.topbar .top-actions {
+  justify-self: end;
+  justify-content: flex-end;
+}
+
+/* Stop chat messages from replaying the card animation during realtime refreshes. */
+.feed-list .post-card {
+  animation: none !important;
+}
+
+@media (max-width: 860px) {
+  .topbar {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    row-gap: 12px;
+  }
+
+  .topbar .site-brand,
+  .topbar .tabs,
+  .topbar .top-actions {
+    justify-self: center;
+  }
+
+  .topbar .top-actions {
+    justify-content: center;
+  }
+}
+
+@media (max-width: 720px) {
+  .login-backdrop {
+    padding: 10px;
+  }
+
+  .login-panel {
+    max-height: calc(100vh - 20px);
+    padding: 22px;
+  }
+
+  .login-subject-list {
+    grid-template-columns: 1fr;
+  }
 }
