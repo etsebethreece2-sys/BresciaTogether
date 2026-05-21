@@ -2177,3 +2177,62 @@
     font-size: 0.84rem;
   }
 }
+
+/* Keeps the login/subject chooser usable on smaller screens. */
+.login-backdrop {
+  position: fixed;
+  inset: 0;
+  align-items: flex-start;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: clamp(12px, 3vw, 28px);
+}
+
+.login-screen {
+  width: min(1080px, 100%);
+  min-height: auto;
+  margin: 0 auto;
+}
+
+.login-panel {
+  max-height: calc(100vh - clamp(24px, 6vw, 56px));
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-bottom: 28px;
+  scrollbar-width: thin;
+}
+
+.login-subject-list {
+  max-height: none;
+  overflow: visible;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.login-confirm-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  padding-top: 16px;
+  padding-bottom: 6px;
+  background: linear-gradient(
+    to top,
+    rgba(3, 20, 13, 0.98),
+    rgba(3, 20, 13, 0.84) 70%,
+    rgba(3, 20, 13, 0)
+  );
+}
+
+@media (max-width: 720px) {
+  .login-backdrop {
+    padding: 10px;
+  }
+
+  .login-panel {
+    max-height: calc(100vh - 20px);
+    padding: 22px;
+  }
+
+  .login-subject-list {
+    grid-template-columns: 1fr;
+  }
+}
