@@ -1352,9 +1352,10 @@ function scrollYapToBottom(behavior = "smooth") {
 }
 
 function handleYapWheelScroll(event) {
+  if (event.defaultPrevented) return;
   if (state.activeTab !== "feedSection") return;
   const target = event.target instanceof Element ? event.target : null;
-  if (target?.closest(".modal-backdrop.open, input, textarea, select")) return;
+  if (target?.closest(".modal-backdrop.open, input, select")) return;
 
   const scroller = elements.feedList;
   if (!scroller || scroller.scrollHeight <= scroller.clientHeight) return;
@@ -1362,6 +1363,39 @@ function handleYapWheelScroll(event) {
   event.preventDefault();
   const deltaScale = event.deltaMode === 1 ? 18 : event.deltaMode === 2 ? scroller.clientHeight : 1;
   scroller.scrollBy({ top: event.deltaY * deltaScale, behavior: "auto" });
+}
+
+function handleYapKeyboardScroll(event) {
+  if (state.activeTab !== "feedSection") return;
+  const target = event.target instanceof Element ? event.target : null;
+  if (target?.closest("input, textarea, select, [contenteditable='true']")) return;
+
+  const scroller = elements.feedList;
+  if (!scroller || scroller.scrollHeight <= scroller.clientHeight) return;
+
+  const keyScroll = {
+    ArrowUp: -56,
+    ArrowDown: 56,
+    PageUp: -scroller.clientHeight * 0.85,
+    PageDown: scroller.clientHeight * 0.85,
+    Home: -Infinity,
+    End: Infinity
+  };
+
+  if (!(event.key in keyScroll)) return;
+  event.preventDefault();
+
+  if (event.key === "Home") {
+    scroller.scrollTo({ top: 0, behavior: "auto" });
+    return;
+  }
+
+  if (event.key === "End") {
+    scroller.scrollTo({ top: scroller.scrollHeight, behavior: "auto" });
+    return;
+  }
+
+  scroller.scrollBy({ top: keyScroll[event.key], behavior: "auto" });
 }
 
 function openModal(id) {
@@ -2092,7 +2126,9 @@ document.addEventListener("keydown", (event) => {
 window.addEventListener("load", updateViewportMetrics);
 window.addEventListener("resize", updateViewportMetrics);
 window.addEventListener("orientationchange", () => window.setTimeout(updateViewportMetrics, 250));
+document.addEventListener("wheel", handleYapWheelScroll, { passive: false, capture: true });
 window.addEventListener("wheel", handleYapWheelScroll, { passive: false });
+document.addEventListener("keydown", handleYapKeyboardScroll);
 window.visualViewport?.addEventListener("resize", updateViewportMetrics);
 window.visualViewport?.addEventListener("scroll", updateViewportMetrics);
 
