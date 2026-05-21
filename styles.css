@@ -369,6 +369,44 @@
       transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
     }
 
+    .chat-attachment-row {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .attachment-picker {
+      width: fit-content;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-radius: 999px;
+      background: rgba(3, 20, 13, 0.62);
+      color: var(--white);
+      padding: 8px 12px;
+      font-size: 0.82rem;
+      font-weight: 850;
+      cursor: pointer;
+      transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+      white-space: nowrap;
+    }
+
+    .attachment-picker:hover {
+      transform: translateY(-2px);
+      border-color: rgba(130, 220, 176, 0.42);
+      background: rgba(130, 220, 176, 0.12);
+    }
+
+    .attachment-meta {
+      min-width: 0;
+      color: var(--muted);
+      font-size: 0.78rem;
+      font-weight: 750;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
     .file-picker:hover {
       transform: translateY(-2px);
       border-color: rgba(130, 220, 176, 0.45);
@@ -865,6 +903,21 @@
       to { opacity: 1; transform: translateY(0); }
     }
 
+    .post-card.is-new {
+      animation: newMessageIn 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
+    }
+
+    @keyframes newMessageIn {
+      from {
+        opacity: 0;
+        transform: translateY(12px) scale(0.985);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+
     .post-header, .note-header {
       display: flex;
       align-items: flex-start;
@@ -880,6 +933,78 @@
 
     .post-body, .note-desc { color: var(--soft-white); white-space: pre-wrap; overflow-wrap: anywhere; margin-bottom: 14px; }
     .post-message .post-body { margin-bottom: 0; }
+
+    .post-body + .chat-attachment {
+      margin-top: 10px;
+    }
+
+    .chat-attachment {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      width: fit-content;
+      max-width: 100%;
+      color: var(--soft-white);
+      border: 1px solid rgba(130, 220, 176, 0.22);
+      background: rgba(255, 255, 255, 0.06);
+      border-radius: 14px;
+      padding: 8px 10px;
+      font-size: 0.82rem;
+      font-weight: 800;
+      overflow: hidden;
+      transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+    }
+
+    .chat-attachment:hover {
+      transform: translateY(-1px);
+      border-color: rgba(130, 220, 176, 0.48);
+      background: rgba(130, 220, 176, 0.12);
+    }
+
+    .chat-attachment span:last-child {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .image-attachment {
+      display: grid;
+      gap: 7px;
+      width: min(320px, 100%);
+      padding: 8px;
+    }
+
+    .image-attachment img {
+      width: 100%;
+      max-height: 220px;
+      object-fit: cover;
+      border-radius: 10px;
+      background: rgba(3, 20, 13, 0.5);
+    }
+
+    .attachment-icon {
+      width: 28px;
+      height: 28px;
+      flex: 0 0 auto;
+      border-radius: 9px;
+      background: linear-gradient(135deg, rgba(130, 220, 176, 0.92), rgba(255, 255, 255, 0.88));
+      position: relative;
+    }
+
+    .attachment-icon::before,
+    .attachment-icon::after {
+      content: "";
+      position: absolute;
+      left: 8px;
+      right: 8px;
+      height: 2px;
+      border-radius: 999px;
+      background: rgba(3, 20, 13, 0.72);
+    }
+
+    .attachment-icon::before { top: 9px; }
+    .attachment-icon::after { top: 16px; }
 
     .tag-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
 
@@ -1092,6 +1217,53 @@
 
     .comment-form { display: grid; grid-template-columns: minmax(180px, 1fr) auto; gap: 8px; width: min(100%, 620px); }
     .comment-form input { background: rgba(3, 20, 13, 0.44); }
+
+    .typing-indicator {
+      justify-self: start;
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      width: fit-content;
+      max-width: min(78%, 520px);
+      padding: 10px 12px;
+      border-radius: 16px 16px 16px 6px;
+      color: var(--muted);
+      background: rgba(3, 20, 13, 0.42);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      font-size: 0.82rem;
+      font-weight: 800;
+      animation: newMessageIn 0.28s ease both;
+    }
+
+    .typing-dots {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      flex: 0 0 auto;
+    }
+
+    .typing-dots i {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: var(--green-300);
+      opacity: 0.5;
+      animation: typingDot 1s ease-in-out infinite;
+    }
+
+    .typing-dots i:nth-child(2) { animation-delay: 0.14s; }
+    .typing-dots i:nth-child(3) { animation-delay: 0.28s; }
+
+    @keyframes typingDot {
+      0%, 70%, 100% {
+        opacity: 0.45;
+        transform: translateY(0);
+      }
+      35% {
+        opacity: 1;
+        transform: translateY(-3px);
+      }
+    }
 
     .empty-state {
       text-align: center;
@@ -2275,7 +2447,7 @@
 }
 
 /* Stop chat messages from replaying the card animation during realtime refreshes. */
-.feed-list .post-card {
+.feed-list .post-card:not(.is-new) {
   animation: none !important;
 }
 
@@ -2421,7 +2593,8 @@ select {
   .resource-card:hover,
   .login-user-option:hover:not(:disabled),
   .login-subject-row:hover,
-  .file-picker:hover {
+  .file-picker:hover,
+  .attachment-picker:hover {
     transform: none;
   }
 }
@@ -2630,6 +2803,21 @@ select {
 
   #feedSection #postForm .message-field {
     min-width: 0;
+  }
+
+  #feedSection #postForm .chat-attachment-row {
+    grid-column: 1 / -1;
+  }
+
+  #feedSection #postForm .attachment-picker,
+  #feedSection #postForm .attachment-meta,
+  #feedSection #postForm .chat-attachment-row .tiny-btn {
+    font-size: 0.74rem;
+  }
+
+  #feedSection #postForm .chat-attachment-row .tiny-btn {
+    width: auto;
+    padding: 6px 9px;
   }
 
   .chat-zoom-control {
@@ -3064,5 +3252,13 @@ body[data-active-tab="feedSection"] .page-stage,
 
   #feedSection.active .feed-list::-webkit-scrollbar {
     width: 0 !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .post-card.is-new,
+  .typing-indicator,
+  .typing-dots i {
+    animation: none !important;
   }
 }
