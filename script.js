@@ -1353,14 +1353,15 @@ function scrollYapToBottom(behavior = "smooth") {
 
 function handleYapWheelScroll(event) {
   if (state.activeTab !== "feedSection") return;
-  if (event.target.closest(".modal-backdrop.open, input, textarea, select")) return;
+  const target = event.target instanceof Element ? event.target : null;
+  if (target?.closest(".modal-backdrop.open, input, textarea, select")) return;
 
   const scroller = elements.feedList;
   if (!scroller || scroller.scrollHeight <= scroller.clientHeight) return;
-  if (getComputedStyle(scroller).overflowY === "visible") return;
 
   event.preventDefault();
-  scroller.scrollTop += event.deltaY;
+  const deltaScale = event.deltaMode === 1 ? 18 : event.deltaMode === 2 ? scroller.clientHeight : 1;
+  scroller.scrollBy({ top: event.deltaY * deltaScale, behavior: "auto" });
 }
 
 function openModal(id) {
