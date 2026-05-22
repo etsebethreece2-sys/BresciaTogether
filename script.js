@@ -1636,8 +1636,12 @@ function renderCalendarEventChip(event) {
 function renderCalendarDayCell(date) {
   const key = dateKey(date);
   const todayKey = dateKey(new Date());
-  const events = calendarEventsForDate(key);
   const isOutside = date.getMonth() !== state.calendarCursor.getMonth();
+  if (isOutside) {
+    return `<span class="calendar-day calendar-day-placeholder" aria-hidden="true"></span>`;
+  }
+
+  const events = calendarEventsForDate(key);
   const selected = key === state.selectedCalendarDate;
   const visibleEvents = events.slice(0, 2).map(renderCalendarEventChip).join("");
   const extraEvents = events.length > 2
@@ -1686,8 +1690,12 @@ function renderSelectedCalendarEvents() {
 function renderCalendar() {
   if (!elements.calendarGrid) return;
   const today = new Date();
-  const selectedDate = parseDateKey(state.selectedCalendarDate) || today;
   const monthStart = startOfMonth(state.calendarCursor);
+  let selectedDate = parseDateKey(state.selectedCalendarDate) || monthStart;
+  if (selectedDate.getFullYear() !== monthStart.getFullYear() || selectedDate.getMonth() !== monthStart.getMonth()) {
+    selectedDate = monthStart;
+    state.selectedCalendarDate = dateKey(monthStart);
+  }
   const gridStart = new Date(monthStart);
   gridStart.setDate(monthStart.getDate() - ((monthStart.getDay() + 6) % 7));
 
