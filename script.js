@@ -9,7 +9,8 @@ const STORAGE_KEYS = {
   claimedUsers: "brescia_claimed_users_v1",
   subjects: "brescia_profile_subjects_v1",
   subjectsConfirmed: "brescia_subjects_confirmed_v1",
-  subjectColors: "brescia_subject_colors_v1"
+  subjectColors: "brescia_subject_colors_v1",
+  calendarEvents: "brescia_calendar_events_v1"
 };
 const LEGACY_NOTES_KEY = "gradeconnect_notes_v1";
 
@@ -120,6 +121,12 @@ const TYPE_LABELS = {
   image: "Image",
   pdf: "PDF"
 };
+const CALENDAR_EVENT_TYPES = {
+  test: { label: "Test", color: "#ef4444" },
+  homework: { label: "Homework", color: "#f59e0b" },
+  event: { label: "Event", color: "#22c55e" },
+  holiday: { label: "Holiday", color: "#3b82f6" }
+};
 const MAX_YAP_MESSAGES = 200;
 const MAX_CHAT_ATTACHMENT_SIZE = 1.8 * 1024 * 1024;
 const CHAT_PAYLOAD_KIND = "brescia-chat-message";
@@ -143,6 +150,9 @@ const state = {
   activeTab: "feedSection",
   chatZoom: Number(localStorage.getItem(STORAGE_KEYS.chatZoom)) || 100,
   tabDirection: "right",
+  calendarEvents: normalizeCalendarEvents(load(STORAGE_KEYS.calendarEvents, [])),
+  calendarCursor: startOfMonth(new Date()),
+  selectedCalendarDate: dateKey(new Date()),
   selectedSubject: SUBJECTS[0],
   selectedNoteId: "",
   mySubjects: normalizeSubjectChoices(load(STORAGE_KEYS.subjects, [])),
@@ -194,7 +204,19 @@ const elements = {
   pdfViewerFrame: $("#pdfViewerFrame"),
   noteModalTitle: $("#noteModalTitle"),
   noteModalMeta: $("#noteModalMeta"),
-  noteModalContent: $("#noteModalContent")
+  noteModalContent: $("#noteModalContent"),
+  calendarTodayLabel: $("#calendarTodayLabel"),
+  calendarTodayButton: $("#calendarTodayButton"),
+  calendarMonthLabel: $("#calendarMonthLabel"),
+  calendarPrevMonth: $("#calendarPrevMonth"),
+  calendarNextMonth: $("#calendarNextMonth"),
+  calendarGrid: $("#calendarGrid"),
+  calendarSelectedDate: $("#calendarSelectedDate"),
+  calendarEventForm: $("#calendarEventForm"),
+  calendarEventDate: $("#calendarEventDate"),
+  calendarEventTitle: $("#calendarEventTitle"),
+  calendarEventType: $("#calendarEventType"),
+  calendarSelectedEvents: $("#calendarSelectedEvents")
 };
 
 let activePdfObjectUrl = "";
@@ -332,6 +354,23 @@ function normalizeNotes(notes) {
   }) : [];
 }
 
+function normalizeCalendarEvents(events) {
+  return Array.isArray(events) ? events.map((event) => {
+    const date = String(event?.date || "");
+    const type = CALENDAR_EVENT_TYPES[event?.type] ? event.type : "event";
+    if (!isDateKey(date)) return null;
+
+    return {
+      id: event.id || crypto.randomUUID(),
+      date,
+      type,
+      title: String(event.title || CALENDAR_EVENT_TYPES[type].label).trim().slice(0, 80) || CALENDAR_EVENT_TYPES[type].label,
+      author: event.author || "Someone",
+      createdAt: Number(event.createdAt) || Date.now()
+    };
+  }).filter(Boolean) : [];
+}
+
 function normalizeType(type, fileName, fileType, link) {
   if (["text", "file", "link", "image", "pdf"].includes(type)) return type;
   if (fileType.startsWith("image/")) return "image";
@@ -348,6 +387,35 @@ function normalizeList(value) {
 function normalizeTags(value) {
   if (Array.isArray(value)) return value.map((item) => String(item).trim()).filter(Boolean);
   return String(value || "").split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+function padDatePart(value) {
+  return String(value).padStart(2, "0");
+}
+
+function dateKey(date) {
+  return `${date.getFullYear()}-${padDatePart(date.getMonth() + 1)}-${padDatePart(date.getDate())}`;
+}
+
+function isDateKey(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ""))) return false;
+  const date = parseDateKey(value);
+  return Boolean(date) && dateKey(date) === value;
+}
+
+function parseDateKey(value) {
+  const [year, month, day] = String(value || "").split("-").map(Number);
+  if (!year || !month || !day) return null;
+  const date = new Date(year, month - 1, day);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function startOfMonth(date) {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+function addMonths(date, amount) {
+  return new Date(date.getFullYear(), date.getMonth() + amount, 1);
 }
 
 function normalizeUserName(value) {
@@ -1525,6 +1593,127 @@ function renderFilePreview(note) {
   return "";
 }
 
+function calendarLongDateLabel(date) {
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric"
+  }).format(date);
+}
+
+function calendarMonthLabel(date) {
+  return new Intl.DateTimeFormat(undefined, {
+    month: "long",
+    year: "numeric"
+  }).format(date);
+}
+
+function calendarEventType(type) {
+  return CALENDAR_EVENT_TYPES[type] || CALENDAR_EVENT_TYPES.event;
+}
+
+function calendarEventsForDate(date) {
+  return state.calendarEvents
+    .filter((event) => event.date === date)
+    .sort((a, b) => a.createdAt - b.createdAt);
+}
+
+function saveCalendarEvents() {
+  state.calendarEvents = normalizeCalendarEvents(state.calendarEvents);
+  return save(STORAGE_KEYS.calendarEvents, state.calendarEvents);
+}
+
+function renderCalendarEventChip(event) {
+  const eventType = calendarEventType(event.type);
+  return `
+    <span class="calendar-event-chip" style="--event-color: ${eventType.color}">
+      ${escapeHTML(event.title)}
+    </span>
+  `;
+}
+
+function renderCalendarDayCell(date) {
+  const key = dateKey(date);
+  const todayKey = dateKey(new Date());
+  const events = calendarEventsForDate(key);
+  const isOutside = date.getMonth() !== state.calendarCursor.getMonth();
+  const selected = key === state.selectedCalendarDate;
+  const visibleEvents = events.slice(0, 2).map(renderCalendarEventChip).join("");
+  const extraEvents = events.length > 2
+    ? `<span class="calendar-more">+${events.length - 2}</span>`
+    : "";
+
+  return `
+    <button
+      class="calendar-day ${isOutside ? "is-outside" : ""} ${key === todayKey ? "is-today" : ""} ${selected ? "is-selected" : ""}"
+      data-calendar-date="${key}"
+      type="button"
+      aria-label="${escapeHTML(calendarLongDateLabel(date))}"
+    >
+      <span class="calendar-day-number">${date.getDate()}</span>
+      <span class="calendar-day-events">${visibleEvents}${extraEvents}</span>
+    </button>
+  `;
+}
+
+function renderSelectedCalendarEvents() {
+  if (!elements.calendarSelectedEvents) return;
+  const events = calendarEventsForDate(state.selectedCalendarDate);
+
+  if (!events.length) {
+    elements.calendarSelectedEvents.innerHTML = `
+      <div class="calendar-empty-day">No events set</div>
+    `;
+    return;
+  }
+
+  elements.calendarSelectedEvents.innerHTML = events.map((event) => {
+    const eventType = calendarEventType(event.type);
+    return `
+      <article class="calendar-event-row" style="--event-color: ${eventType.color}">
+        <span class="calendar-event-dot" aria-hidden="true"></span>
+        <div>
+          <strong>${escapeHTML(event.title)}</strong>
+          <small>${escapeHTML(eventType.label)}</small>
+        </div>
+        <button class="tiny-btn" data-calendar-delete="${escapeHTML(event.id)}" type="button">Delete</button>
+      </article>
+    `;
+  }).join("");
+}
+
+function renderCalendar() {
+  if (!elements.calendarGrid) return;
+  const today = new Date();
+  const selectedDate = parseDateKey(state.selectedCalendarDate) || today;
+  const monthStart = startOfMonth(state.calendarCursor);
+  const gridStart = new Date(monthStart);
+  gridStart.setDate(monthStart.getDate() - ((monthStart.getDay() + 6) % 7));
+
+  elements.calendarTodayLabel.textContent = calendarLongDateLabel(today);
+  elements.calendarMonthLabel.textContent = calendarMonthLabel(state.calendarCursor);
+  elements.calendarSelectedDate.textContent = calendarLongDateLabel(selectedDate);
+  elements.calendarEventDate.value = state.selectedCalendarDate;
+
+  elements.calendarGrid.innerHTML = Array.from({ length: 42 }, (_, index) => {
+    const date = new Date(gridStart);
+    date.setDate(gridStart.getDate() + index);
+    return renderCalendarDayCell(date);
+  }).join("");
+
+  renderSelectedCalendarEvents();
+}
+
+function selectCalendarDate(date) {
+  if (!isDateKey(date)) return;
+  const parsedDate = parseDateKey(date);
+  state.selectedCalendarDate = date;
+  state.calendarCursor = startOfMonth(parsedDate);
+  renderCalendar();
+  elements.calendarEventTitle?.focus({ preventScroll: true });
+}
+
 function updateSelectedResourceView(note) {
   state.selectedNoteId = note?.id || "";
   elements.notesList.querySelectorAll(".resource-card").forEach((card) => {
@@ -1561,6 +1750,7 @@ async function openPdfViewer(note) {
 function renderAll() {
   renderFeed();
   renderNotes();
+  renderCalendar();
   renderTabBadges();
   window.requestAnimationFrame(updateViewportMetrics);
 }
@@ -1718,6 +1908,7 @@ function setTab(tabId) {
   document.body.dataset.activeTab = tabId;
   updateViewportMetrics();
   markTabSeen(tabId);
+  if (tabId === "calendarSection") renderCalendar();
 
   tabs.forEach((button) => button.classList.toggle("active", button.dataset.tab === tabId));
   renderTabBadges();
@@ -2351,6 +2542,61 @@ elements.subjectRail.addEventListener("click", (event) => {
   renderNotes();
 });
 
+elements.calendarPrevMonth?.addEventListener("click", () => {
+  state.calendarCursor = addMonths(state.calendarCursor, -1);
+  renderCalendar();
+});
+
+elements.calendarNextMonth?.addEventListener("click", () => {
+  state.calendarCursor = addMonths(state.calendarCursor, 1);
+  renderCalendar();
+});
+
+elements.calendarTodayButton?.addEventListener("click", () => {
+  const today = new Date();
+  state.calendarCursor = startOfMonth(today);
+  state.selectedCalendarDate = dateKey(today);
+  renderCalendar();
+});
+
+elements.calendarGrid?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-calendar-date]");
+  if (!button) return;
+  selectCalendarDate(button.dataset.calendarDate);
+});
+
+elements.calendarEventForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const author = requireDisplayName();
+  if (!author) return;
+
+  const date = elements.calendarEventDate.value || state.selectedCalendarDate;
+  const type = CALENDAR_EVENT_TYPES[elements.calendarEventType.value] ? elements.calendarEventType.value : "event";
+  if (!isDateKey(date)) return;
+
+  const eventType = calendarEventType(type);
+  const title = elements.calendarEventTitle.value.trim() || eventType.label;
+  state.calendarEvents.push({
+    id: crypto.randomUUID(),
+    date,
+    type,
+    title,
+    author,
+    createdAt: Date.now()
+  });
+
+  saveCalendarEvents();
+  elements.calendarEventTitle.value = "";
+  renderCalendar();
+});
+
+elements.calendarSelectedEvents?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-calendar-delete]");
+  if (!button) return;
+  state.calendarEvents = state.calendarEvents.filter((calendarEvent) => calendarEvent.id !== button.dataset.calendarDelete);
+  saveCalendarEvents();
+  renderCalendar();
+});
 
 $$(".tabs .tab-btn").forEach((button) => button.addEventListener("click", () => {
   setTab(button.dataset.tab);
@@ -2462,6 +2708,12 @@ window.addEventListener("storage", (event) => {
     } catch (error) {
       console.warn("Could not read typing signal", error);
     }
+    return;
+  }
+
+  if (event.key === STORAGE_KEYS.calendarEvents) {
+    state.calendarEvents = normalizeCalendarEvents(load(STORAGE_KEYS.calendarEvents, []));
+    renderCalendar();
     return;
   }
 
