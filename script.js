@@ -1162,7 +1162,7 @@ function updatePostAttachmentMeta() {
   const hasFile = Boolean(file);
   elements.postAttachmentMeta.textContent = hasFile
     ? `${file.name} ${file.size ? `- ${formatBytes(file.size)}` : ""}`
-    : "No file selected";
+    : "";
   elements.clearPostAttachment?.classList.toggle("hidden", !hasFile);
 }
 
