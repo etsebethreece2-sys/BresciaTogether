@@ -3353,8 +3353,9 @@ body[data-active-tab="calendarSection"] {
   background: rgba(130, 220, 176, 0.1);
 }
 
-.calendar-day.is-outside {
-  opacity: 0.48;
+.calendar-day-placeholder {
+  pointer-events: none;
+  visibility: hidden;
 }
 
 .calendar-day.is-today {
